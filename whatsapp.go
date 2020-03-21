@@ -4,11 +4,13 @@ import (
 	"encoding/gob"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"os/signal"
+	"regexp"
+	"strings"
 	"syscall"
 	"time"
-	"strings"
 
 	qrcodeTerminal "github.com/Baozisoftware/qrcode-terminal-go"
 	"github.com/Rhymen/go-whatsapp"
@@ -38,7 +40,20 @@ func (h *waHandler) HandleError(err error) {
 func (*waHandler) HandleTextMessage(message whatsapp.TextMessage) {
 	splitData := strings.FieldsFunc(message.Info.RemoteJid, Split)
 	if splitData[1] == "1500829488" {
-		fmt.Printf(message.Text + "\n")
+		r, _ := regexp.Compile("http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*(),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+")
+		urls := r.FindAllString(message.Text,-1)
+		for i := range urls {
+			urlObject , err := url.Parse(urls[i])
+			if err != nil {
+				panic(err)
+			}
+			if urlObject.Host=="open.spotify.com"{
+				path := strings.Split(urlObject.Path,"/")
+				if len(path)>2 && path[1]=="track" {
+					fmt.Print(path[2]+"\n")
+				}
+			}
+		}
 	}
 }
 

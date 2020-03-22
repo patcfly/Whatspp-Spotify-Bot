@@ -28,6 +28,7 @@ var (
 
 type waHandler struct {
 	c *whatsapp.Conn
+	s *spotify.Client
 }
 
 //HandleError needs to be implemented to be a valid WhatsApp handler
@@ -47,7 +48,7 @@ func (h *waHandler) HandleError(err error) {
 	}
 }
 
-func (*waHandler) HandleTextMessage(message whatsapp.TextMessage) {
+func (h *waHandler) HandleTextMessage(message whatsapp.TextMessage) {
 	splitData := strings.FieldsFunc(message.Info.RemoteJid, Split)
 	if splitData[1] == "1500829488" {
 		r, _ := regexp.Compile("http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*(),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+")
@@ -60,7 +61,11 @@ func (*waHandler) HandleTextMessage(message whatsapp.TextMessage) {
 			if urlObject.Host=="open.spotify.com"{
 				path := strings.Split(urlObject.Path,"/")
 				if len(path)>2 && path[1]=="track" {
-					fmt.Print(path[2]+"\n")
+					track, err := h.s.GetTrack(spotify.ID(path[2]))
+					if err!=nil{
+						log.Fatal(err)
+					}
+					fmt.Printf(track.Name + "  " + track.Album.Name + " " + string(track.Duration))
 				}
 			}
 		}
@@ -91,7 +96,7 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Println("You are logged in as:", user.ID)
-	
+
 	//create new WhatsApp connection
 	wac, err := whatsapp.NewConn(5 * time.Second)
 	if err != nil {
@@ -99,7 +104,7 @@ func main() {
 	}
 
 	//Add handler
-	wac.AddHandler(&waHandler{wac})
+	wac.AddHandler(&waHandler{wac,client})
 
 	//login or restore
 	if err := login(wac); err != nil {

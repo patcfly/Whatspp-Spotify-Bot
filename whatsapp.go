@@ -19,11 +19,14 @@ import (
 )
 
 const redirectURI = "http://localhost:8080/callback"
+const playlistId = "0s3a3Wd7DNsg3yisDdSo8k"
 
 var (
-	auth  = spotify.NewAuthenticator(redirectURI, spotify.ScopeUserReadPrivate)
+	auth  = spotify.NewAuthenticator(redirectURI, spotify.ScopePlaylistModifyPublic)
 	ch    = make(chan *spotify.Client)
 	state = "abc123"
+	sema = make(chan struct{},1)
+	allTracks = make(map[string]bool)
 )
 
 type waHandler struct {
@@ -33,7 +36,6 @@ type waHandler struct {
 
 //HandleError needs to be implemented to be a valid WhatsApp handler
 func (h *waHandler) HandleError(err error) {
-
 	if e, ok := err.(*whatsapp.ErrConnectionFailed); ok {
 		log.Printf("Connection failed, underlying error: %v", e.Err)
 		log.Println("Waiting 30sec...")
@@ -63,9 +65,24 @@ func (h *waHandler) HandleTextMessage(message whatsapp.TextMessage) {
 				if len(path)>2 && path[1]=="track" {
 					track, err := h.s.GetTrack(spotify.ID(path[2]))
 					if err!=nil{
-						log.Fatal(err)
+						//log.Fatal(err)
+						fmt.Printf("couldnt find song error : ",err)
+						return
 					}
-					fmt.Printf(track.Name + "  " + track.Album.Name + " " + string(track.Duration))
+					fmt.Printf(track.Name + "  " + track.Album.Name + "\n")
+					sema<- struct{}{}
+					exists := allTracks[track.ID.String()]
+					if !exists {
+						//add to the playlist
+						_, err := h.s.AddTracksToPlaylist(playlistId,spotify.ID(path[2]))
+						if err != nil {
+							log.Fatal(err)
+						}else{
+							allTracks[path[2]] = true
+						}
+					}
+					//release
+					<-sema
 				}
 			}
 		}
@@ -95,7 +112,16 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println("You are logged in as:", user.ID)
+	playlist,error := client.GetPlaylist(playlistId)
+	if error!=nil{
+		log.Fatal(error)
+	}
+	fmt.Println("You are logged in as:", user.ID," Playlist : ",playlist.Name)
+	getAllTracks(client,playlist.ID.String(),playlist.Name)
+
+	for key, _ := range allTracks {
+		fmt.Printf(key)
+	}
 
 	//create new WhatsApp connection
 	wac, err := whatsapp.NewConn(5 * time.Second)
@@ -111,11 +137,16 @@ func main() {
 		log.Fatalf("error logging in: %v\n", err)
 	}
 
-	//verifies phone connectivity
-	pong, err := wac.AdminTest()
+	for{
+		//verifies phone connectivity
+		pong, err := wac.AdminTest()
 
-	if !pong || err != nil {
-		log.Fatalf("error pinging in: %v\n", err)
+		if !pong || err != nil {
+			//log.Fatalf("error pinging in: %v\n", err)
+			fmt.Printf("error pinging in: %v\n", err)
+		}else{
+			break
+		}
 	}
 
 	c := make(chan os.Signal, 1)
@@ -207,3 +238,38 @@ func completeAuth(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Login Completed!")
 	ch <- &client
 }
+
+func getAllTracks(client *spotify.Client, playlistId string,playlistName string){
+	sema <- struct{}{}
+	limit := 100
+	offset := 0
+
+	var options spotify.Options
+	options.Limit = &limit
+	options.Offset = &offset
+
+	for {
+		tracksPage, err := client.GetPlaylistTracksOpt(spotify.ID(playlistId), &options, "")
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		log.Printf("Playlist %v: fetched page of %v track(s)", playlistName, len(tracksPage.Tracks))
+
+		for _, playlistTrack := range tracksPage.Tracks {
+			track := playlistTrack.Track
+			allTracks[track.ID.String()] = true
+		}
+
+		// The Spotify API always returns full pages unless it has none left to
+		// return.
+		if len(tracksPage.Tracks) < 100 {
+			break
+		}
+
+		offset = offset + len(tracksPage.Tracks)
+	}
+	<- sema
+	log.Printf("Playlist %v: %v track(s)", playlistName, len(allTracks))
+}
+

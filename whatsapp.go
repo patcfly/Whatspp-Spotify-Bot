@@ -180,6 +180,7 @@ func login(wac *whatsapp.Conn) error {
 			terminal := qrcodeTerminal.New()
 			terminal.Get(<-qr).Print()
 		}()
+		wac.SetClientVersion(0, 4, 1307)
 		session, err = wac.Login(qr)
 		if err != nil {
 			return fmt.Errorf("error during login: %v\n", err)
@@ -235,7 +236,7 @@ func completeAuth(w http.ResponseWriter, r *http.Request) {
 	}
 	// use the token to get an authenticated client
 	client := auth.NewClient(tok)
-	fmt.Fprintf(w, "Login Completed!")
+	_, _ = fmt.Fprintf(w, "Login Completed!")
 	ch <- &client
 }
 
